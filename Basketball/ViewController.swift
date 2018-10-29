@@ -11,8 +11,10 @@ import SceneKit
 import ARKit
 
 class ViewController: UIViewController, ARSCNViewDelegate {
-
+    
     @IBOutlet var sceneView: ARSCNView!
+    
+    var hoopAdded = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -23,8 +25,12 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Show statistics such as fps and timing information
         sceneView.showsStatistics = true
         
+        sceneView.automaticallyUpdatesLighting = true
+        
+        sceneView.autoenablesDefaultLighting = true
+        
         // Create a new scene
-        let scene = SCNScene(named: "art.scnassets/ship.scn")!
+        let scene = SCNScene()
         
         // Set the scene to the view
         sceneView.scene = scene
@@ -35,7 +41,8 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         
         // Create a session configuration
         let configuration = ARWorldTrackingConfiguration()
-
+        configuration.planeDetection = .vertical
+        
         // Run the view's session
         sceneView.session.run(configuration)
     }
@@ -46,9 +53,50 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Pause the view's session
         sceneView.session.pause()
     }
-
-    // MARK: - ARSCNViewDelegate
     
+    // MARK: - ARSCNViewDelegate
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard let anchor = anchor as? ARPlaneAnchor else { return }
+        
+        node.addChildNode(createWall(anchor: anchor))
+    }
+    
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let anchor = anchor as? ARPlaneAnchor,
+            let node = node.childNodes.first,
+            let plane = node.geometry as? SCNPlane else { return }
+        
+        plane.width = CGFloat(anchor.extent.x)
+        plane.height = CGFloat(anchor.extent.z)
+        
+        node.position = SCNVector3(anchor.center.x, 0, anchor.center.z)
+    }
+    
+    func createWall(anchor: ARPlaneAnchor) -> SCNNode {
+        let width = CGFloat(anchor.extent.x)
+        let height = CGFloat(anchor.extent.z)
+        let node = SCNNode(geometry: SCNPlane(width: width, height: height))
+        node.name = "wall"
+        node.eulerAngles.x = -.pi / 2
+        node.opacity = 0.25
+        return node
+    }
+    
+    func stopPlaneDetection() {
+        let configuration = sceneView.session.configuration as! ARWorldTrackingConfiguration
+        configuration.planeDetection = []
+        sceneView.session.run(configuration)
+    }
+    
+    func hideWalls() {
+        hoopAdded = true
+         stopPlaneDetection()
+        sceneView.scene.rootNode.enumerateChildNodes { node, _ in
+            if node.name == "wall" {
+                node.removeFromParentNode()
+            }
+        }
+    }
 /*
     // Override to create and configure nodes for anchors added to the view's session.
     func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
@@ -72,4 +120,68 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Reset tracking and/or remove existing anchors if consistent tracking is required
         
     }
+    func addHoop(result: ARHitTestResult) {
+        let scene = SCNScene(named: "art.scnassets/Hoop.scn")
+        
+        guard let node = scene?.rootNode.childNode(withName: "Hoop", recursively: true) else { return }
+        
+        node.simdTransform = result.worldTransform
+        node.eulerAngles.x += -.pi / 2
+        
+      
+        node.physicsBody = SCNPhysicsBody(type: .static, shape: SCNPhysicsShape(node: node, options: [
+                SCNPhysicsShape.Option.type:
+                    SCNPhysicsShape.ShapeType.concavePolyhedron])
+    )
+        
+        sceneView.scene.rootNode.addChildNode(node)
+        hoopAdded = true
+        hideWalls()
+    }
+    
+    func createBasketBalls() {
+        guard let frame = sceneView.session.currentFrame else {return}
+        
+        let node = SCNNode(geometry: SCNSphere(radius: 0.25))
+        node.simdTransform = frame.camera.transform
+        
+        let material = SCNMaterial()
+       material.diffuse.contents = UIImage(named: "art.scnassets/paint-peeling-albedo")
+       material.ambientOcclusion.contents = UIImage(named: "art.scnassets/paint-peeling-ao")
+        material.metalness.contents = UIImage(named: "art.scnassets/paint-peeling-metalness")
+        material.normal.contents =  UIImage(named: "art.scnassets/paint-peeling-normal")
+        material.roughness.contents = UIImage(named: "art.scnassets/paint-peeling-roughness")
+          node.geometry?.firstMaterial = material
+
+        let body = SCNPhysicsBody(type: .dynamic, shape: SCNPhysicsShape(node: node))
+        node.physicsBody = body
+        
+        let power = Float(10)
+        
+        let transform = SCNMatrix4(frame.camera.transform)
+        let force = SCNVector3(
+            -transform.m31 * power,
+            -transform.m32 * power,
+            -transform.m33 * power
+        )
+        node.physicsBody?.applyForce(force, asImpulse: true)
+        
+        sceneView.scene.rootNode.addChildNode(node)
+        
+    }
+    
+    @IBAction func screenTapped(_ sender: UITapGestureRecognizer) {
+        if !hoopAdded {
+            let location = sender.location(in: sceneView)
+            let result = sceneView.hitTest(location, types: [.existingPlaneUsingExtent])
+            
+            if let result = result.first {
+                addHoop(result: result)
+            }
+        } else {
+           createBasketBalls()
+        }
+    }
+
+    
 }
